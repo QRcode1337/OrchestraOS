@@ -1,16 +1,29 @@
 import OpenAI from 'openai'
 
-const apiKey = process.env.OPENAI_API_KEY
+let _openaiClient: OpenAI | null = null
 
-if (!apiKey) {
-  throw new Error('Missing OPENAI_API_KEY environment variable')
+function getOpenAIClient() {
+  if (_openaiClient) return _openaiClient
+
+  const apiKey = process.env.OPENAI_API_KEY
+
+  if (!apiKey) {
+    throw new Error('Missing OPENAI_API_KEY environment variable. Make sure it is set in .env')
+  }
+
+  _openaiClient = new OpenAI({ apiKey })
+  return _openaiClient
 }
 
 /**
  * OpenAI client for embeddings and completions
+ * Lazy-loaded to ensure environment variables are available
  */
-export const openai = new OpenAI({
-  apiKey
+export const openai = new Proxy({} as OpenAI, {
+  get(target, prop) {
+    const client = getOpenAIClient()
+    return (client as any)[prop]
+  }
 })
 
 /**
@@ -19,7 +32,8 @@ export const openai = new OpenAI({
  * @returns 1536-dimensional embedding vector
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
-  const response = await openai.embeddings.create({
+  const client = getOpenAIClient()
+  const response = await client.embeddings.create({
     model: 'text-embedding-3-small',
     input: text,
     dimensions: 1536
@@ -34,7 +48,8 @@ export async function generateEmbedding(text: string): Promise<number[]> {
  * @returns Array of 1536-dimensional embedding vectors
  */
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const response = await openai.embeddings.create({
+  const client = getOpenAIClient()
+  const response = await client.embeddings.create({
     model: 'text-embedding-3-small',
     input: texts,
     dimensions: 1536

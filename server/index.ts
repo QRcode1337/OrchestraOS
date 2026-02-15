@@ -1,14 +1,14 @@
-import express from 'express'
-import cors from 'cors'
+// Load environment variables FIRST before any other imports
 import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-// Load environment variables
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: join(__dirname, '.env') })
 
-// Import routes
+// Now import everything else
+import express from 'express'
+import cors from 'cors'
 import memoryRoutes from './routes/memory.js'
 import swarmRoutes from './routes/swarm.js'
 import cascadeRoutes from './routes/cascade.js'
