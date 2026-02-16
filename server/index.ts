@@ -12,6 +12,7 @@ import cors from 'cors'
 import memoryRoutes from './routes/memory.js'
 import swarmRoutes from './routes/swarm.js'
 import cascadeRoutes from './routes/cascade.js'
+import erismornRoutes from './routes/erismorn.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -33,24 +34,8 @@ app.get('/health', (req, res) => {
   })
 })
 
-// Volta OS compatibility endpoints (prevent console errors from existing components)
-app.get('/api/status', (req, res) => {
-  res.json({
-    status: 'online',
-    heartbeatState: {
-      lastBeat: new Date().toISOString(),
-      criticalAlerts: []
-    }
-  })
-})
-
-app.get('/api/btc-price', (req, res) => {
-  res.json({ price: null, source: 'placeholder' })
-})
-
-app.get('/api/cron-jobs', (req, res) => {
-  res.json({ jobs: [] })
-})
+// ErisMorn core routes (status, intelligence, labs, observability, etc.)
+app.use('/api', erismornRoutes)
 
 // AgentForge + CASCADE API Routes
 app.use('/api/memory', memoryRoutes)
