@@ -33,7 +33,26 @@ app.get('/health', (req, res) => {
   })
 })
 
-// API Routes
+// Volta OS compatibility endpoints (prevent console errors from existing components)
+app.get('/api/status', (req, res) => {
+  res.json({
+    status: 'online',
+    heartbeatState: {
+      lastBeat: new Date().toISOString(),
+      criticalAlerts: []
+    }
+  })
+})
+
+app.get('/api/btc-price', (req, res) => {
+  res.json({ price: null, source: 'placeholder' })
+})
+
+app.get('/api/cron-jobs', (req, res) => {
+  res.json({ jobs: [] })
+})
+
+// AgentForge + CASCADE API Routes
 app.use('/api/memory', memoryRoutes)
 app.use('/api/swarm', swarmRoutes)
 app.use('/api/cascade', cascadeRoutes)

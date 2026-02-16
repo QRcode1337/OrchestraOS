@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
+import { Orbit } from 'lucide-react'
 import VectorGalaxy from '../components/AgentForge/VectorGalaxy'
 import MemorySearch from '../components/AgentForge/MemorySearch'
 import LeadDashboard from '../components/CASCADE/LeadDashboard'
 import { api } from '../lib/api'
 
-type Tab = 'memories' | 'search' | 'cascade'
+type Tab = 'vector-galaxy' | 'memory-search' | 'cascade-leads'
+
+interface AgentForgePageProps {
+  initialTab?: string
+}
 
 interface Memory {
   id: string
@@ -17,8 +22,14 @@ interface Memory {
   last_accessed: string
 }
 
-export default function AgentForgePage() {
-  const [activeTab, setActiveTab] = useState<Tab>('memories')
+export default function AgentForgePage({ initialTab }: AgentForgePageProps) {
+  const mapTab = (t?: string): Tab => {
+    if (t === 'vector-galaxy') return 'vector-galaxy'
+    if (t === 'memory-search') return 'memory-search'
+    if (t === 'cascade-leads') return 'cascade-leads'
+    return 'vector-galaxy'
+  }
+  const [activeTab, setActiveTab] = useState<Tab>(mapTab(initialTab))
   const [memories, setMemories] = useState<Memory[]>([])
   const [selectedMemoryId, setSelectedMemoryId] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
@@ -67,49 +78,32 @@ export default function AgentForgePage() {
     console.log('Lead clicked:', lead)
   }
 
-  return (
-    <div className="flex flex-col h-screen bg-gray-950">
-      {/* Header */}
-      <div className="bg-gray-900 border-b border-gray-800 p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white mb-1">
-              AgentForge x CASCADE
-            </h1>
-            <p className="text-sm text-gray-400">
-              Persistent Memory & Business Automation Platform
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
-            <span className="text-sm text-gray-400">
-              {connected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-        </div>
-      </div>
+  // Sync tab when parent changes
+  useEffect(() => {
+    if (initialTab) setActiveTab(mapTab(initialTab))
+  }, [initialTab])
 
-      {/* Tab Navigation */}
-      <div className="bg-gray-900 border-b border-gray-800 px-4">
-        <div className="flex gap-1">
-          {[
-            { id: 'memories' as Tab, label: 'Vector Galaxy', icon: '🌌' },
-            { id: 'search' as Tab, label: 'Memory Search', icon: '🔍' },
-            { id: 'cascade' as Tab, label: 'CASCADE Leads', icon: '📞' }
-          ].map(tab => (
+  return (
+    <div className="flex flex-col h-[calc(100vh-120px)]">
+      {/* Connection Status Bar */}
+      <div className="flex items-center justify-between px-4 py-2 bg-bg-layer-1 border-b border-neon-cyan/10">
+        <div className="flex items-center gap-3">
+          <span className="text-orange-400 font-mono text-sm tracking-wider uppercase">AgentForge x CASCADE</span>
+          <span className="text-gray-600 text-xs">Persistent Memory & Business Automation</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(0,255,128,0.5)]' : 'bg-red-500'}`} />
+          <span className="text-xs text-gray-500 font-mono">
+            {connected ? 'ONLINE' : 'OFFLINE'}
+          </span>
+          {!connected && (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === tab.id
-                  ? 'border-cyan-500 text-cyan-400'
-                  : 'border-transparent text-gray-400 hover:text-gray-300'
-              }`}
+              onClick={checkHealth}
+              className="text-xs text-orange-400 hover:text-orange-300 ml-2 underline"
             >
-              <span className="mr-2">{tab.icon}</span>
-              {tab.label}
+              Retry
             </button>
-          ))}
+          )}
         </div>
       </div>
 
@@ -117,19 +111,19 @@ export default function AgentForgePage() {
       <div className="flex-1 overflow-hidden">
         {!connected ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <div className="w-16 h-16 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-4" />
-            <p className="text-lg mb-2">Backend server not connected</p>
-            <p className="text-sm">Start the server with: npm run dev:server</p>
+            <Orbit className="w-16 h-16 mb-4 opacity-20 text-orange-400" />
+            <p className="text-lg mb-2 text-gray-300">Backend server not connected</p>
+            <p className="text-sm text-gray-500">Start the server with: <code className="text-orange-400">npm run dev:server</code></p>
             <button
               onClick={checkHealth}
-              className="mt-4 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
+              className="mt-4 px-6 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded transition-colors font-mono text-sm"
             >
-              Retry Connection
+              RECONNECT
             </button>
           </div>
         ) : (
           <>
-            {activeTab === 'memories' && (
+            {activeTab === 'vector-galaxy' && (
               <VectorGalaxy
                 memories={memories}
                 onMemoryClick={handleMemoryClick}
@@ -137,14 +131,14 @@ export default function AgentForgePage() {
               />
             )}
 
-            {activeTab === 'search' && (
+            {activeTab === 'memory-search' && (
               <MemorySearch
                 onSearch={handleSearch}
                 onResultClick={handleResultClick}
               />
             )}
 
-            {activeTab === 'cascade' && (
+            {activeTab === 'cascade-leads' && (
               <LeadDashboard
                 onLoadLeads={handleLoadLeads}
                 onLeadClick={handleLeadClick}
