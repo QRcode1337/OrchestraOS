@@ -14,17 +14,17 @@ const supabase = createClient(
 async function checkExistingSchema() {
   console.log('🔍 Checking existing AgentForge schema in Supabase...\n')
 
-  // Check for existing memories table
+  // Check for existing agent_memories table
   const { data: memories, error: memoriesError } = await supabase
-    .from('memories')
+    .from('agent_memories')
     .select('*')
     .limit(1)
 
   if (!memoriesError) {
-    console.log('✅ AgentForge "memories" table EXISTS')
+    console.log('✅ AgentForge "agent_memories" table EXISTS')
     console.log('📊 Sample:', memories)
   } else {
-    console.log('❌ memories table:', memoriesError.message)
+    console.log('❌ agent_memories table:', memoriesError.message)
   }
 
   // Check for swarms table

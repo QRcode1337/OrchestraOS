@@ -2,9 +2,9 @@ import { supabase } from '../lib/supabase'
 import { generateEmbedding } from '../lib/openai'
 import type { Database } from '../types/supabase'
 
-type Memory = Database['public']['Tables']['memories']['Row']
-type MemoryInsert = Database['public']['Tables']['memories']['Insert']
-type MemoryUpdate = Database['public']['Tables']['memories']['Update']
+type Memory = Database['public']['Tables']['agent_memories']['Row']
+type MemoryInsert = Database['public']['Tables']['agent_memories']['Insert']
+type MemoryUpdate = Database['public']['Tables']['agent_memories']['Update']
 
 export interface StoreMemoryOptions {
   agentId: string
@@ -40,7 +40,7 @@ export async function storeMemory(options: StoreMemoryOptions): Promise<Memory> 
 
   // Insert into database
   const { data, error } = await supabase
-    .from('memories')
+    .from('agent_memories')
     .insert({
       agent_id: agentId,
       content,
@@ -95,7 +95,7 @@ export async function searchMemories(options: SearchMemoriesOptions) {
 export async function reinforceMemory(memoryId: string, strengthDelta: number): Promise<Memory> {
   // Get current memory
   const { data: current, error: fetchError } = await supabase
-    .from('memories')
+    .from('agent_memories')
     .select('strength')
     .eq('id', memoryId)
     .single()
@@ -109,7 +109,7 @@ export async function reinforceMemory(memoryId: string, strengthDelta: number): 
 
   // Update memory
   const { data, error } = await supabase
-    .from('memories')
+    .from('agent_memories')
     .update({
       strength: newStrength,
       last_accessed: new Date().toISOString()
@@ -130,7 +130,7 @@ export async function reinforceMemory(memoryId: string, strengthDelta: number): 
  */
 export async function applyDecay(agentId: string): Promise<number> {
   const { data: memories, error: fetchError } = await supabase
-    .from('memories')
+    .from('agent_memories')
     .select('id, strength, decay_rate, last_accessed')
     .eq('agent_id', agentId)
 
@@ -160,7 +160,7 @@ export async function applyDecay(agentId: string): Promise<number> {
   // Batch update
   for (const update of updates) {
     await supabase
-      .from('memories')
+      .from('agent_memories')
       .update({ strength: update.strength })
       .eq('id', update.id)
   }
@@ -173,7 +173,7 @@ export async function applyDecay(agentId: string): Promise<number> {
  */
 export async function pruneWeakMemories(agentId: string, threshold: number = 0.1): Promise<number> {
   const { data, error } = await supabase
-    .from('memories')
+    .from('agent_memories')
     .delete()
     .eq('agent_id', agentId)
     .lt('strength', threshold)

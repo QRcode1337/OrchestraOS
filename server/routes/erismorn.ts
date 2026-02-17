@@ -447,7 +447,7 @@ router.get('/observability/comms', (req, res) => {
 
 router.get('/sessions', (req, res) => {
   try {
-    const sessionsPath = '/Users/patrickgallowaypro/.openclaw/sessions/sessions.json'
+    const sessionsPath = path.join(process.env.HOME || '', '.openclaw/sessions/sessions.json')
     const sessions = readJsonFile(sessionsPath)
     if (sessions?.sessions) {
       const list = Object.entries(sessions.sessions).map(([key, session]: [string, any]) => ({
@@ -485,7 +485,7 @@ router.get('/memory/list', (req, res) => {
 
 // ── Claude-mem bridge ────────────────────────────────────────
 
-const CLAUDE_MEM_BASE = 'http://localhost:37777'
+const CLAUDE_MEM_BASE = process.env.CLAUDE_MEM_URL || 'http://localhost:37777'
 
 router.get('/claude-mem/health', async (req, res) => {
   try {
@@ -512,11 +512,18 @@ router.get('/file', (req, res) => {
   const filePath = req.query.path as string
   if (!filePath) return res.status(400).json({ error: 'Path required' })
 
-  // Security: only allow reading from ErisMorn workspace
+  // Security: resolve symlinks and verify path stays within workspace
   const fullPath = path.join(ERISMORN_ROOT, filePath)
-  if (!fullPath.startsWith(ERISMORN_ROOT)) return res.status(403).json({ error: 'Access denied' })
+  let resolvedPath: string
+  try {
+    resolvedPath = fs.realpathSync(fullPath)
+  } catch {
+    return res.status(404).json({ error: 'File not found' })
+  }
+  const resolvedRoot = fs.realpathSync(ERISMORN_ROOT)
+  if (!resolvedPath.startsWith(resolvedRoot)) return res.status(403).json({ error: 'Access denied' })
 
-  const content = readMdFile(fullPath)
+  const content = readMdFile(resolvedPath)
   if (content) {
     res.json({ path: filePath, content })
   } else {
@@ -528,7 +535,14 @@ router.get('/file', (req, res) => {
 
 router.get('/memory/dir/:dirName', (req, res) => {
   const dirPath = path.join(ERISMORN_ROOT, 'memory', req.params.dirName)
-  if (!dirPath.startsWith(path.join(ERISMORN_ROOT, 'memory'))) return res.status(403).json({ error: 'Access denied' })
+  let resolvedDir: string
+  try {
+    resolvedDir = fs.realpathSync(dirPath)
+  } catch {
+    return res.json({ files: [], dirName: req.params.dirName })
+  }
+  const resolvedMemory = fs.realpathSync(path.join(ERISMORN_ROOT, 'memory'))
+  if (!resolvedDir.startsWith(resolvedMemory)) return res.status(403).json({ error: 'Access denied' })
 
   try {
     if (!fs.existsSync(dirPath)) return res.json({ files: [], dirName: req.params.dirName })
@@ -588,7 +602,14 @@ router.get('/memory/search', (req, res) => {
 router.get('/directory', (req, res) => {
   const relPath = req.query.path as string || ''
   const fullPath = path.join(ERISMORN_ROOT, relPath)
-  if (!fullPath.startsWith(ERISMORN_ROOT)) return res.status(403).json({ error: 'Access denied' })
+  let resolvedPath: string
+  try {
+    resolvedPath = fs.realpathSync(fullPath)
+  } catch {
+    return res.status(404).json({ error: 'Directory not found' })
+  }
+  const resolvedRoot = fs.realpathSync(ERISMORN_ROOT)
+  if (!resolvedPath.startsWith(resolvedRoot)) return res.status(403).json({ error: 'Access denied' })
 
   try {
     if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) {

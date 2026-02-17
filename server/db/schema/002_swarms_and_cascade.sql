@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.swarms (
 CREATE TABLE IF NOT EXISTS public.swarm_agents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   swarm_id UUID REFERENCES swarms(id) ON DELETE CASCADE,
-  agent_id UUID REFERENCES agents(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL,
   role TEXT NOT NULL,
   status TEXT CHECK (status IN ('idle', 'working', 'blocked', 'completed')) DEFAULT 'idle',
   current_task JSONB,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS public.cascade_leads (
   source TEXT CHECK (source IN ('missed_call', 'web_form', 'referral')),
   status TEXT CHECK (status IN ('new', 'contacted', 'qualified', 'booking', 'booked', 'completed', 'lost')) DEFAULT 'new',
   conversation_history JSONB DEFAULT '[]',
-  memory_id UUID REFERENCES memories(id) ON DELETE SET NULL,
+  memory_id UUID REFERENCES agent_memories(id) ON DELETE SET NULL,
   assigned_swarm_id UUID REFERENCES swarms(id) ON DELETE SET NULL,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
@@ -69,7 +69,15 @@ CREATE INDEX IF NOT EXISTS idx_cascade_bookings_date ON cascade_bookings (schedu
 CREATE INDEX IF NOT EXISTS idx_cascade_nurture_lead ON cascade_nurture_sequences (lead_id);
 CREATE INDEX IF NOT EXISTS idx_cascade_nurture_scheduled ON cascade_nurture_sequences (scheduled_time);
 
--- Update timestamp trigger (reuse existing function from AgentForge)
+-- Update timestamp trigger function
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER swarms_updated_at
   BEFORE UPDATE ON swarms
   FOR EACH ROW
