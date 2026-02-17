@@ -813,33 +813,45 @@ export default function IntelligencePanel() {
         fetch(`${API_BASE}/erismorn/recommendations`).catch(() => null),
       ])
 
-      // Helper: parse JSON and reject stub responses from catch-all
-      const parse = async (res: Response | null) => {
-        if (!res || !res.ok) return null
-        const data = await res.json()
-        if (data?.stub) return null
-        return data
+      // Briefing
+      if (briefingRes && briefingRes.ok) {
+        const data = await briefingRes.json()
+        setBriefing(data)
+      } else {
+        setBriefing(null)
       }
 
-      // Briefing
-      const briefingData = await parse(briefingRes)
-      setBriefing(briefingData)
-
       // Cron outputs
-      const cronData = await parse(cronRes)
-      setCronOutputs(cronData)
+      if (cronRes && cronRes.ok) {
+        const data = await cronRes.json()
+        setCronOutputs(data)
+      } else {
+        setCronOutputs(null)
+      }
 
       // Anomalies
-      const anomalyData = await parse(anomalyRes)
-      setAnomalies(anomalyData?.anomalies || [])
+      if (anomalyRes && anomalyRes.ok) {
+        const data = await anomalyRes.json()
+        setAnomalies(data.anomalies || [])
+      } else {
+        setAnomalies([])
+      }
 
       // Synthesis patterns
-      const synthesisData = await parse(synthesisRes)
-      setPatterns(synthesisData?.patterns || [])
+      if (synthesisRes && synthesisRes.ok) {
+        const data = await synthesisRes.json()
+        setPatterns(data.patterns || [])
+      } else {
+        setPatterns([])
+      }
 
       // Recommendations
-      const recData = await parse(recRes)
-      setRecommendations(recData?.recommendations || [])
+      if (recRes && recRes.ok) {
+        const data = await recRes.json()
+        setRecommendations(data.recommendations || [])
+      } else {
+        setRecommendations([])
+      }
 
       setLastRefresh(new Date())
     } catch {

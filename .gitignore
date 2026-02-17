@@ -38,6 +38,3 @@ coverage/
 # Temporary
 .tmp/
 tmp/
-
-# Git worktrees
-.worktrees/
