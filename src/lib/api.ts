@@ -253,6 +253,29 @@ class ApiClient {
       }>('/api/cascade/leads', { method: 'GET' })
   }
 
+  // Config / Manifest API
+  config = {
+    manifest: () =>
+      this.request<{
+        workspace: string
+        memoryRoot: string
+        agents: Array<{ id: string; name: string; directory: string; type: string; description?: string }>
+        dataSources: Array<{ type: string; path: string; dirs?: string[] }>
+        vectorStore: { provider: string; embeddingModel: string; dimensions: number }
+        embedder: { enabled: boolean; pollIntervalMs: number; maxContentLength: number }
+      }>('/api/config/manifest'),
+
+    agents: () =>
+      this.request<{
+        agents: Array<{ id: string; name: string; directory: string; type: string; description?: string }>
+      }>('/api/config/agents'),
+
+    reload: () =>
+      this.request<{ reloaded: boolean; agentCount: number; dataSourceCount: number }>('/api/config/reload', {
+        method: 'POST'
+      })
+  }
+
   // Health check
   health = () => this.request('/health', { method: 'GET' })
 }

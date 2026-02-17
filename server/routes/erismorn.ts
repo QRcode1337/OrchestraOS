@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import * as fs from 'fs'
 import * as path from 'path'
+import { loadManifest, invalidateManifestCache } from '../config/loader.js'
 
 const router = Router()
 const ERISMORN_ROOT = process.env.ERISMORN_ROOT || '/Users/patrickgallowaypro/ErisMorn'
@@ -652,6 +653,32 @@ router.get('/claude-mem/stats', async (req, res) => {
       .map(([name]) => name)
     res.json(stats)
   } catch { res.json({ total: 0, error: 'Claude Code not running', available: false }) }
+})
+
+// ── Config / Manifest ────────────────────────────────────────
+
+router.get('/config/manifest', (req, res) => {
+  try {
+    const manifest = loadManifest()
+    res.json(manifest)
+  } catch (error: any) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+router.get('/config/agents', (req, res) => {
+  try {
+    const manifest = loadManifest()
+    res.json({ agents: manifest.agents })
+  } catch (error: any) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+router.post('/config/reload', (req, res) => {
+  invalidateManifestCache()
+  const manifest = loadManifest()
+  res.json({ reloaded: true, agentCount: manifest.agents.length, dataSourceCount: manifest.dataSources.length })
 })
 
 export default router
