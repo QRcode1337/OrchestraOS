@@ -226,8 +226,12 @@ router.get('/erismorn/token-usage', (req, res) => {
     const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'token-usage.json'), 'utf-8'))
     const today = new Date().toISOString().split('T')[0]
     const todayEntries = (data.entries || []).filter((e: any) => e.timestamp.startsWith(today))
-    res.json({ ...data, todayEntries })
-  } catch { res.json({ entries: [], totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, totalCost: 0, requestCount: 0 }, todayEntries: [] }) }
+    // Compute sessionCost from today's entries
+    const sessionCost = todayEntries.reduce((sum: number, e: any) => {
+      return sum + (e.inputTokens / 1_000_000) * 3.0 + (e.outputTokens / 1_000_000) * 15.0
+    }, 0)
+    res.json({ ...data, todayEntries, sessionCost })
+  } catch { res.json({ entries: [], totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, totalCost: 0, requestCount: 0 }, todayEntries: [], sessionCost: 0 }) }
 })
 
 router.get('/erismorn/history', (req, res) => {
@@ -354,7 +358,25 @@ router.get('/observability/state', (req, res) => {
   const swarms = Object.values(state?.swarms || {}) as any[]
   const tasks = Object.values(state?.tasks || {}) as any[]
   const spawnedList = Object.values(spawned || {}) as any[]
-  res.json({ agents, swarms, tasks, spawned: spawnedList, memory: memory || {}, timestamp: new Date().toISOString() })
+
+  // Aggregate stats for frontend FlowState.stats shape
+  function countBy(arr: any[], key: string): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const item of arr) {
+      const val = item[key] || 'unknown'
+      counts[val] = (counts[val] || 0) + 1
+    }
+    return counts
+  }
+
+  const stats = {
+    agents: { total: agents.length, byStatus: countBy(agents, 'status'), byType: countBy(agents, 'type') },
+    swarms: { total: swarms.length, byStatus: countBy(swarms, 'status'), byStrategy: countBy(swarms, 'strategy') },
+    tasks: { total: tasks.length, byStatus: countBy(tasks, 'status'), byType: countBy(tasks, 'type'), byPriority: countBy(tasks, 'priority') },
+    spawned: { total: spawnedList.length, byStatus: countBy(spawnedList, 'status') }
+  }
+
+  res.json({ agents, swarms, tasks, spawned: spawnedList, memory: memory || {}, stats, timestamp: new Date().toISOString() })
 })
 
 router.get('/observability/traces', (req, res) => {
