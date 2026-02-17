@@ -357,6 +357,85 @@ router.get('/observability/state', (req, res) => {
   res.json({ agents, swarms, tasks, spawned: spawnedList, memory: memory || {}, timestamp: new Date().toISOString() })
 })
 
+router.get('/observability/traces', (req, res) => {
+  const traces: any[] = []
+  const state = readJsonFile(path.join(FLOW_STATE_DIR, 'state.json'))
+  if (state?.agents) {
+    for (const [id, agent] of Object.entries(state.agents as Record<string, any>)) {
+      traces.push({ id: `agent-${id}`, type: 'agent_lifecycle', source: agent.type || 'unknown', agentId: id, action: `Agent ${agent.status}`, detail: agent.task || null, status: agent.status, timestamp: agent.created_at || new Date().toISOString() })
+    }
+  }
+  const spawned = readJsonFile(path.join(FLOW_STATE_DIR, 'spawned.json'))
+  if (spawned) {
+    for (const [id, sp] of Object.entries(spawned as Record<string, any>)) {
+      traces.push({ id: `spawn-${id}`, type: 'agent_spawn', source: sp.agent_type || 'spawner', agentId: id, action: `Spawned ${sp.agent_type || 'agent'}`, status: sp.status || 'spawned', timestamp: sp.spawned_at || new Date().toISOString() })
+    }
+  }
+  if (state?.tasks) {
+    for (const [id, task] of Object.entries(state.tasks as Record<string, any>)) {
+      traces.push({ id: `task-${id}`, type: 'task_assignment', source: task.agent_id || 'unassigned', action: `Task: ${task.title || id}`, status: task.status, timestamp: task.created_at || new Date().toISOString() })
+    }
+  }
+  const decisions = readJsonFile(path.join(DATA_DIR, 'decisions.json'))
+  if (Array.isArray(decisions)) {
+    for (const d of decisions.slice(0, 50)) {
+      traces.push({ id: d.id, type: 'erismorn_decision', source: 'erismorn', action: d.title, detail: d.reasoning, status: d.status || 'active', timestamp: d.timestamp })
+    }
+  }
+  traces.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  res.json({ traces, count: traces.length, timestamp: new Date().toISOString() })
+})
+
+router.get('/observability/comms', (req, res) => {
+  const comms: any[] = []
+  try {
+    if (fs.existsSync(SHARED_MEMORY_DIR)) {
+      for (const file of fs.readdirSync(SHARED_MEMORY_DIR).filter(f => f.endsWith('.md') && f !== 'CLAUDE.md')) {
+        const fullPath = path.join(SHARED_MEMORY_DIR, file)
+        const stat = fs.statSync(fullPath)
+        const content = readMdFile(fullPath)
+        comms.push({ id: `shared-${file}`, type: 'shared_memory', channel: 'shared_memory', file, preview: content?.split('\n').slice(0, 10).join('\n') || '', size: stat.size, lastModified: stat.mtime.toISOString(), participants: extractParticipants(content || '') })
+      }
+    }
+  } catch { /* skip */ }
+  const delegations = readJsonFile(path.join(DATA_DIR, 'delegations.json'))
+  if (delegations?.delegations) {
+    for (const d of delegations.delegations) {
+      comms.push({ id: `deleg-${d.id}`, type: 'delegation', channel: 'task_delegation', from: 'erismorn', to: d.agentName || d.agentId, message: d.task, status: d.status, priority: d.priority, timestamp: d.createdAt })
+    }
+  }
+  const agentDirs = ['sentinel', 'scout', 'curated', 'synthesis', 'builder', 'pieces-ltm']
+  const memoryDir = path.join(ERISMORN_ROOT, 'memory')
+  for (const dir of agentDirs) {
+    const dirPath = path.join(memoryDir, dir)
+    try {
+      if (fs.existsSync(dirPath)) {
+        for (const file of fs.readdirSync(dirPath).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 3)) {
+          const stat = fs.statSync(path.join(dirPath, file))
+          comms.push({ id: `output-${dir}-${file}`, type: 'agent_output', channel: `agent/${dir}`, from: dir.toUpperCase(), to: 'erismorn', file: `${dir}/${file}`, size: stat.size, timestamp: stat.mtime.toISOString() })
+        }
+      }
+    } catch { /* skip */ }
+  }
+  comms.sort((a, b) => new Date(b.timestamp || b.lastModified || '').getTime() - new Date(a.timestamp || a.lastModified || '').getTime())
+  res.json({ communications: comms, count: comms.length, timestamp: new Date().toISOString() })
+})
+
+// ── Sessions ─────────────────────────────────────────────────
+
+router.get('/sessions', (req, res) => {
+  try {
+    const sessionsPath = '/Users/patrickgallowaypro/.openclaw/sessions/sessions.json'
+    const sessions = readJsonFile(sessionsPath)
+    if (sessions?.sessions) {
+      const list = Object.entries(sessions.sessions).map(([key, session]: [string, any]) => ({
+        key, label: session.label, kind: session.kind, updatedAt: session.updatedAt, messageCount: session.messageCount
+      }))
+      res.json({ sessions: list })
+    } else { res.json({ sessions: [] }) }
+  } catch { res.json({ sessions: [] }) }
+})
+
 // ── Memory browser ───────────────────────────────────────────
 
 router.get('/memory/today', (req, res) => {
@@ -403,6 +482,133 @@ router.get('/claude-mem/observations', async (req, res) => {
     const response = await fetch(url)
     res.json(await response.json())
   } catch { res.json({ items: [], available: false }) }
+})
+
+// ── File reader ─────────────────────────────────────────────
+
+router.get('/file', (req, res) => {
+  const filePath = req.query.path as string
+  if (!filePath) return res.status(400).json({ error: 'Path required' })
+
+  // Security: only allow reading from ErisMorn workspace
+  const fullPath = path.join(ERISMORN_ROOT, filePath)
+  if (!fullPath.startsWith(ERISMORN_ROOT)) return res.status(403).json({ error: 'Access denied' })
+
+  const content = readMdFile(fullPath)
+  if (content) {
+    res.json({ path: filePath, content })
+  } else {
+    res.status(404).json({ error: 'File not found' })
+  }
+})
+
+// ── Memory directory browser ────────────────────────────────
+
+router.get('/memory/dir/:dirName', (req, res) => {
+  const dirPath = path.join(ERISMORN_ROOT, 'memory', req.params.dirName)
+  if (!dirPath.startsWith(path.join(ERISMORN_ROOT, 'memory'))) return res.status(403).json({ error: 'Access denied' })
+
+  try {
+    if (!fs.existsSync(dirPath)) return res.json({ files: [], dirName: req.params.dirName })
+    const files = fs.readdirSync(dirPath)
+      .filter(f => f.endsWith('.md') || f.endsWith('.json'))
+      .map(f => {
+        const stat = fs.statSync(path.join(dirPath, f))
+        return { name: f, size: stat.size, mtime: stat.mtime.toISOString() }
+      })
+      .sort((a, b) => b.mtime.localeCompare(a.mtime))
+    res.json({ files, dirName: req.params.dirName, count: files.length })
+  } catch { res.json({ files: [], dirName: req.params.dirName }) }
+})
+
+// ── Memory search ───────────────────────────────────────────
+
+router.get('/memory/search', (req, res) => {
+  const q = (req.query.q as string || '').toLowerCase()
+  if (!q) return res.json({ results: [], query: '' })
+
+  const results: any[] = []
+  const memoryDir = path.join(ERISMORN_ROOT, 'memory')
+
+  function searchDir(dirPath: string, prefix: string) {
+    try {
+      for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          searchDir(path.join(dirPath, entry.name), `${prefix}${entry.name}/`)
+        } else if (entry.name.endsWith('.md') && entry.name !== 'CLAUDE.md' && entry.name !== 'README.md') {
+          const fullPath = path.join(dirPath, entry.name)
+          const content = readMdFile(fullPath)
+          if (content && content.toLowerCase().includes(q)) {
+            const stat = fs.statSync(fullPath)
+            const lines = content.split('\n')
+            const matchLine = lines.findIndex(l => l.toLowerCase().includes(q))
+            results.push({
+              file: `${prefix}${entry.name}`,
+              title: lines.find(l => l.startsWith('#'))?.replace(/^#+\s*/, '') || entry.name,
+              matchLine: matchLine >= 0 ? matchLine + 1 : null,
+              preview: lines.slice(Math.max(0, matchLine - 1), matchLine + 3).join('\n'),
+              size: stat.size,
+              mtime: stat.mtime.toISOString()
+            })
+          }
+        }
+      }
+    } catch { /* skip unreadable dirs */ }
+  }
+
+  searchDir(memoryDir, '')
+  results.sort((a, b) => b.mtime.localeCompare(a.mtime))
+  res.json({ results: results.slice(0, 50), query: q, count: results.length })
+})
+
+// ── Directory listing ───────────────────────────────────────
+
+router.get('/directory', (req, res) => {
+  const relPath = req.query.path as string || ''
+  const fullPath = path.join(ERISMORN_ROOT, relPath)
+  if (!fullPath.startsWith(ERISMORN_ROOT)) return res.status(403).json({ error: 'Access denied' })
+
+  try {
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) {
+      return res.status(404).json({ error: 'Directory not found' })
+    }
+    const entries = fs.readdirSync(fullPath, { withFileTypes: true })
+      .filter(e => !e.name.startsWith('.'))
+      .map(e => ({
+        name: e.name,
+        type: e.isDirectory() ? 'directory' : 'file',
+        size: e.isFile() ? fs.statSync(path.join(fullPath, e.name)).size : undefined,
+        mtime: fs.statSync(path.join(fullPath, e.name)).mtime.toISOString()
+      }))
+      .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1))
+    res.json({ path: relPath, entries, count: entries.length })
+  } catch { res.json({ path: relPath, entries: [], count: 0 }) }
+})
+
+// ── Claude-mem stats ────────────────────────────────────────
+
+router.get('/claude-mem/stats', async (req, res) => {
+  try {
+    const response = await fetch(`${CLAUDE_MEM_BASE}/api/observations?limit=100`)
+    const data = await response.json()
+    const items = data.items || []
+    const stats: { total: number; hasMore: boolean; byType: Record<string, number>; byProject: Record<string, number>; recentProjects: string[] } = {
+      total: items.length,
+      hasMore: data.hasMore,
+      byType: {},
+      byProject: {},
+      recentProjects: []
+    }
+    for (const obs of items) {
+      stats.byType[obs.type] = (stats.byType[obs.type] || 0) + 1
+      stats.byProject[obs.project] = (stats.byProject[obs.project] || 0) + 1
+    }
+    stats.recentProjects = Object.entries(stats.byProject)
+      .sort((a, b) => (b[1] as number) - (a[1] as number))
+      .slice(0, 5)
+      .map(([name]) => name)
+    res.json(stats)
+  } catch { res.json({ total: 0, error: 'Claude Code not running', available: false }) }
 })
 
 export default router
