@@ -44,7 +44,7 @@ Complete backend persistence layer for ErisMorn Dashboard, integrated with Agent
    - Indexed by userId + createdAt, expiresAt
 
 ### Migration Files
-- Location: `/Users/patrickgallowaypro/Documents/PROJECTS/AgentForge/server/db/migrations/`
+- Location: `/Users/patrickgallowaypro/ErisMorn/volta-os/server/db/migrations/`
 - Generated: `0000_overrated_warpath.sql`
 - Apply with: `npm run db:push`
 
@@ -107,7 +107,7 @@ AgentForge/server/
 ├── package.json                    # Added express, cors, tsx
 └── API.md                          # API documentation
 
-ErisMorn-Dashboard/
+volta-os/
 └── src/
     └── lib/
         └── api.ts                  # Client API wrapper
@@ -117,7 +117,7 @@ ErisMorn-Dashboard/
 
 ### Frontend API Client
 
-Location: `/Users/patrickgallowaypro/Documents/PROJECTS/ErisMorn-Dashboard/src/lib/api.ts`
+Location: `/Users/patrickgallowaypro/ErisMorn/volta-os/src/lib/api.ts`
 
 Features:
 - Type-safe wrapper around fetch
@@ -150,14 +150,14 @@ await api.tasks.update(taskId, { status: 'done' })
 
 Already done during implementation:
 ```bash
-cd /Users/patrickgallowaypro/Documents/PROJECTS/AgentForge/server
+cd /Users/patrickgallowaypro/ErisMorn/volta-os/server
 npm install  # Dependencies already installed
 ```
 
 ### 2. Apply Database Migrations
 
 ```bash
-cd /Users/patrickgallowaypro/Documents/PROJECTS/AgentForge/server
+cd /Users/patrickgallowaypro/ErisMorn/volta-os/server
 npm run db:push
 ```
 
@@ -214,7 +214,7 @@ useEffect(() => {
 
 ### Environment Variables
 
-Required in `/Users/patrickgallowaypro/Documents/PROJECTS/AgentForge/server/.env`:
+Required in `/Users/patrickgallowaypro/ErisMorn/volta-os/server/.env`:
 
 ```bash
 DATABASE_URL=postgresql://...           # Supabase connection string
@@ -222,7 +222,7 @@ PORT=3000                              # Optional
 CORS_ORIGIN=http://localhost:5173     # Optional
 ```
 
-For frontend (ErisMorn-Dashboard/.env):
+For frontend (volta-os/.env):
 ```bash
 VITE_API_URL=http://localhost:3000/api  # Optional
 VITE_USE_MOCK_API=false                 # Use real API
@@ -255,7 +255,7 @@ VITE_USE_MOCK_API=false                 # Use real API
 ### Manual Testing
 ```bash
 # Start server
-cd /Users/patrickgallowaypro/Documents/PROJECTS/AgentForge/server
+cd /Users/patrickgallowaypro/ErisMorn/volta-os/server
 npm run dev
 
 # In another terminal, test endpoints
@@ -300,9 +300,9 @@ curl http://localhost:3000/api/dashboard/tasks
 
 ## Resources
 
-- **API Documentation**: `/Users/patrickgallowaypro/Documents/PROJECTS/AgentForge/server/API.md`
-- **Dashboard Module**: `/Users/patrickgallowaypro/Documents/PROJECTS/AgentForge/server/src/dashboard/README.md`
-- **Client Library**: `/Users/patrickgallowaypro/Documents/PROJECTS/ErisMorn-Dashboard/src/lib/api.ts`
+- **API Documentation**: `/Users/patrickgallowaypro/ErisMorn/volta-os/server/API.md`
+- **Dashboard Module**: `/Users/patrickgallowaypro/ErisMorn/volta-os/server/src/dashboard/README.md`
+- **Client Library**: `/Users/patrickgallowaypro/ErisMorn/volta-os/src/lib/api.ts`
 - **Drizzle Docs**: https://orm.drizzle.team/
 - **Express Docs**: https://expressjs.com/
 

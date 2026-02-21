@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import * as fs from 'fs'
@@ -6,6 +7,10 @@ import { execSync } from 'child_process'
 import {
   chat,
   getChatHistory,
+  listSessions,
+  getSession,
+  createSession,
+  deleteSession,
   getDecisions,
   getStandingOrders,
   addStandingOrder,
@@ -13,6 +18,7 @@ import {
   deleteStandingOrder,
   getTokenUsage
 } from './erismorn.js'
+import { councilChat, councilBroadcast, getCouncilAgents, getCouncilSessions, getCouncilSession, deleteCouncilSession, getAvailableModels, setAgentModel, councilDeliberate, getDeliberationSessions, getDeliberationSession } from './council.js'
 
 const app = express()
 const PORT = 3001
@@ -77,6 +83,7 @@ app.get('/', (req, res) => {
       '/api/portfolio',
       '/api/memory/today',
       '/api/action-log',
+      '/api/health/keys',
       '/api/erismorn/agents/:id/toggle',
       '/api/erismorn/delegations',
       '/api/erismorn/delegate',
@@ -86,6 +93,30 @@ app.get('/', (req, res) => {
       '/api/erismorn/anomalies',
       '/api/erismorn/recommendations'
     ]
+  })
+})
+
+// GET /api/health/keys - Provider key presence (booleans only, no secret values)
+app.get('/api/health/keys', (req, res) => {
+  const configured = {
+    ANTHROPIC_API_KEY: Boolean(process.env.ANTHROPIC_API_KEY),
+    OPENAI_API_KEY: Boolean(process.env.OPENAI_API_KEY),
+    OPENROUTER_API_KEY: Boolean(process.env.OPENROUTER_API_KEY),
+    XAI_API_KEY: Boolean(process.env.XAI_API_KEY),
+    BRAVE_API_KEY: Boolean(process.env.BRAVE_API_KEY),
+    GROQ_API_KEY: Boolean(process.env.GROQ_API_KEY),
+    TOGETHERAI_API_KEY: Boolean(process.env.TOGETHERAI_API_KEY),
+    MISTRAL_API_KEY: Boolean(process.env.MISTRAL_API_KEY),
+    GOOGLE_API_KEY: Boolean(process.env.GOOGLE_API_KEY)
+  }
+
+  const providersConfigured = Object.values(configured).filter(Boolean).length
+
+  res.json({
+    status: providersConfigured > 0 ? 'ok' : 'degraded',
+    providersConfigured,
+    configured,
+    timestamp: new Date().toISOString()
   })
 })
 
@@ -776,16 +807,17 @@ app.get('/api/directory', (req, res) => {
 
 // POST /api/erismorn/chat - Chat with ErisMorn (Claude API)
 app.post('/api/erismorn/chat', async (req, res) => {
-  const { message } = req.body
+  const { message, sessionId } = req.body
   if (!message) {
     return res.status(400).json({ error: 'Message required' })
   }
 
   try {
-    const result = await chat(message)
+    const result = await chat(message, sessionId)
     res.json({
       response: result.response,
       toolsUsed: result.toolsUsed,
+      sessionId: result.sessionId,
       timestamp: new Date().toISOString()
     })
   } catch (e: any) {
@@ -797,11 +829,37 @@ app.post('/api/erismorn/chat', async (req, res) => {
   }
 })
 
-// GET /api/erismorn/history - Chat history
+// GET /api/erismorn/history - Chat history (legacy compat)
 app.get('/api/erismorn/history', (req, res) => {
   const limit = parseInt(req.query.limit as string) || 50
   const history = getChatHistory(limit)
   res.json({ messages: history })
+})
+
+// GET /api/erismorn/sessions - List all sessions
+app.get('/api/erismorn/sessions', (req, res) => {
+  res.json({ sessions: listSessions() })
+})
+
+// POST /api/erismorn/sessions - Create new session
+app.post('/api/erismorn/sessions', (req, res) => {
+  const { title } = req.body || {}
+  const session = createSession(title)
+  res.json({ session })
+})
+
+// GET /api/erismorn/sessions/:id - Get session messages
+app.get('/api/erismorn/sessions/:id', (req, res) => {
+  const session = getSession(req.params.id)
+  if (!session) return res.status(404).json({ error: 'Session not found' })
+  res.json({ session })
+})
+
+// DELETE /api/erismorn/sessions/:id - Delete a session
+app.delete('/api/erismorn/sessions/:id', (req, res) => {
+  const deleted = deleteSession(req.params.id)
+  if (!deleted) return res.status(404).json({ error: 'Session not found' })
+  res.json({ ok: true })
 })
 
 // GET /api/erismorn/decisions - Decision feed
@@ -849,6 +907,192 @@ app.delete('/api/erismorn/standing-orders/:id', (req, res) => {
 app.get('/api/erismorn/token-usage', (req, res) => {
   const usage = getTokenUsage()
   res.json(usage)
+})
+
+// ============================================================
+// COUNCIL: MULTI-AGENT CHAT (Atlas, Oracle, Midas, ErisMorn)
+// ============================================================
+
+// GET /api/council/agents - List council agent metadata
+app.get('/api/council/agents', (req, res) => {
+  res.json({ agents: getCouncilAgents() })
+})
+
+// POST /api/council/chat - Chat with a specific council agent
+app.post('/api/council/chat', async (req, res) => {
+  const { agentId, message, sessionId } = req.body
+  if (!agentId || !message) {
+    return res.status(400).json({ error: 'agentId and message required' })
+  }
+
+  try {
+    const result = await councilChat(agentId, message, sessionId)
+    res.json({
+      response: result.response,
+      toolsUsed: result.toolsUsed,
+      sessionId: result.sessionId,
+      timestamp: new Date().toISOString()
+    })
+  } catch (e: any) {
+    console.error('Council chat error:', e)
+    res.status(500).json({
+      error: 'Council agent unavailable',
+      detail: e.message || String(e)
+    })
+  }
+})
+
+// POST /api/council/broadcast - Sequential broadcast with SSE streaming
+app.post('/api/council/broadcast', async (req, res) => {
+  const { message } = req.body
+  if (!message) {
+    return res.status(400).json({ error: 'message required' })
+  }
+
+  // Set up SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  })
+
+  try {
+    const agents = getCouncilAgents()
+    const results: any[] = []
+
+    for (const agent of agents) {
+      // Send "thinking" event for this agent
+      res.write(`data: ${JSON.stringify({ type: 'thinking', agentId: agent.id })}\n\n`)
+
+      let enrichedMessage = message
+      if (results.length > 0) {
+        const priorResponses = results
+          .map((r: any) => `[${r.emoji} ${r.name} (${agents.find(a => a.id === r.agentId)?.role || ''})]:\n${r.response}`)
+          .join('\n\n---\n\n')
+        enrichedMessage = `The following question was posed to the council:\n\n"${message}"\n\nThe following council members have already responded:\n\n${priorResponses}\n\n---\n\nNow it's your turn. Consider what has been said, agree or disagree where appropriate, and add your unique perspective as ${agent.role}.`
+      }
+
+      try {
+        const result = await councilChat(agent.id, enrichedMessage)
+        const entry = {
+          agentId: agent.id,
+          name: agent.name,
+          emoji: agent.emoji,
+          color: agent.color,
+          response: result.response,
+          toolsUsed: result.toolsUsed
+        }
+        results.push(entry)
+        res.write(`data: ${JSON.stringify({ type: 'response', ...entry })}\n\n`)
+      } catch (e: any) {
+        const entry = {
+          agentId: agent.id,
+          name: agent.name,
+          emoji: agent.emoji,
+          color: agent.color,
+          response: `[Error: ${e.message || String(e)}]`,
+          toolsUsed: []
+        }
+        results.push(entry)
+        res.write(`data: ${JSON.stringify({ type: 'response', ...entry })}\n\n`)
+      }
+    }
+
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+    res.end()
+  } catch (e: any) {
+    res.write(`data: ${JSON.stringify({ type: 'error', message: e.message })}\n\n`)
+    res.end()
+  }
+})
+
+// GET /api/council/sessions/:agentId - Get sessions for a council agent
+app.get('/api/council/sessions/:agentId', (req, res) => {
+  const sessions = getCouncilSessions(req.params.agentId)
+  res.json({ sessions })
+})
+
+// GET /api/council/session/:sessionId - Get one council session with messages
+app.get('/api/council/session/:sessionId', (req, res) => {
+  const session = getCouncilSession(req.params.sessionId)
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' })
+  }
+  res.json({ session })
+})
+
+// DELETE /api/council/session/:sessionId - Delete a council session
+app.delete('/api/council/session/:sessionId', (req, res) => {
+  const deleted = deleteCouncilSession(req.params.sessionId)
+  if (!deleted) {
+    return res.status(404).json({ error: 'Session not found' })
+  }
+  res.json({ success: true })
+})
+
+// GET /api/council/models - List all available local models
+app.get('/api/council/models', async (req, res) => {
+  try {
+    const models = await getAvailableModels()
+    res.json({ models })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// POST /api/council/agents/:agentId/model - Set model for a specific agent
+app.post('/api/council/agents/:agentId/model', (req, res) => {
+  try {
+    const { model } = req.body
+    if (!model) return res.status(400).json({ error: 'model is required' })
+    setAgentModel(req.params.agentId, model)
+    res.json({ success: true, agentId: req.params.agentId, model })
+  } catch (e: any) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+// POST /api/council/deliberate - Multi-round deliberation with SSE streaming
+app.post('/api/council/deliberate', async (req, res) => {
+  const { topic, rounds } = req.body
+  if (!topic) {
+    return res.status(400).json({ error: 'topic is required' })
+  }
+
+  // Set up SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  })
+
+  try {
+    const session = await councilDeliberate(topic, rounds || 3, (event) => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
+    })
+
+    res.write(`data: ${JSON.stringify({ type: 'done', sessionId: session.id })}\n\n`)
+    res.end()
+  } catch (e: any) {
+    res.write(`data: ${JSON.stringify({ type: 'error', message: e.message })}\n\n`)
+    res.end()
+  }
+})
+
+// GET /api/council/deliberations - List deliberation sessions
+app.get('/api/council/deliberations', (req, res) => {
+  res.json({ sessions: getDeliberationSessions() })
+})
+
+// GET /api/council/deliberation/:id - Get full deliberation session
+app.get('/api/council/deliberation/:id', (req, res) => {
+  const session = getDeliberationSession(req.params.id)
+  if (!session) {
+    return res.status(404).json({ error: 'Deliberation session not found' })
+  }
+  res.json({ session })
 })
 
 // ============================================================
@@ -2183,7 +2427,7 @@ app.get('/api/claude-mem/stats', async (req, res) => {
 // ============================================================
 
 app.listen(PORT, () => {
-  console.log(`🍎 VOLTA OS API running on http://localhost:${PORT}`)
+  console.log(`🍎 ORCHESTRA OS API running on http://localhost:${PORT}`)
   console.log(`   Workspace: ${ERISMORN_ROOT}`)
   console.log(`   Claude-mem bridge: ${CLAUDE_MEM_BASE}`)
 })

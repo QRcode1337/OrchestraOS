@@ -140,7 +140,28 @@ npm run dev:server
 
 ### First-Time Setup
 
+Create `server/.env` from template:
+
+```bash
+cp server/.env.example server/.env
+```
+
+Then fill in your keys (minimum: `ANTHROPIC_API_KEY`) and paths:
+
+```env
+ANTHROPIC_API_KEY=your_api_key_here
+ERISMORN_ROOT=/path/to/your/ErisMorn
+```
+
+Verify provider key loading:
+
+```bash
+curl http://localhost:3001/api/health/keys
+```
+
 The database schema is already applied to Supabase. To verify:
+
+### Build for Production
 
 ```bash
 # Check database schema

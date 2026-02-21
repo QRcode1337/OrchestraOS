@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { 
-  BookOpen, ClipboardList, FolderOpen, Layers, RefreshCw, 
+import {
+  BookOpen, ClipboardList, FolderOpen, Layers, RefreshCw,
   ChevronRight, FileText, Calendar, Brain, Zap, Search,
   ChevronDown, FolderClosed, Clock, Hash
 } from 'lucide-react'
+import MarkdownPreview from './MarkdownPreview'
 
 const API_BASE = 'http://localhost:3001/api'
 
@@ -290,9 +291,7 @@ export function MemoryTab() {
                 ← Back
               </button>
             </div>
-            <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
-              {fileContent}
-            </pre>
+            <MarkdownPreview content={fileContent} className="max-h-[600px] overflow-auto" />
           </>
         ) : (
           // MEMORY.md view
@@ -301,9 +300,7 @@ export function MemoryTab() {
               <Brain className="w-4 h-4" />
               MEMORY.md — Long-Term Memory
             </h3>
-            <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono leading-relaxed max-h-[600px] overflow-auto">
-              {memoryMd || 'No MEMORY.md found'}
-            </pre>
+            <MarkdownPreview content={memoryMd || 'No MEMORY.md found'} className="max-h-[600px] overflow-auto" />
           </>
         )}
       </div>
@@ -419,9 +416,7 @@ export function BriefsTab() {
         {selected ? (
           <>
             <h3 className="text-sm font-semibold text-purple-300 mb-3">{selected.name}</h3>
-            <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
-              {selected.content}
-            </pre>
+            <MarkdownPreview content={selected.content} />
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-500">
@@ -556,9 +551,7 @@ export function FilesTab() {
               <FileText className="w-4 h-4" />
               {selectedFile}
             </h3>
-            <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono leading-relaxed max-h-[600px] overflow-auto">
-              {fileContent}
-            </pre>
+            <MarkdownPreview content={fileContent} className="max-h-[600px] overflow-auto" />
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-500">
@@ -595,7 +588,7 @@ export function ProjectsTab() {
       progress: 100
     },
     {
-      name: 'VOLTA OS',
+      name: 'ORCHESTRA OS',
       status: 'active',
       desc: 'Agent operations dashboard',
       path: '~/ErisMorn/volta-os',

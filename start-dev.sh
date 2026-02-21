@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# VOLTA OS Development Launcher
+# ORCHESTRA OS Development Launcher
 # Starts both backend and frontend servers
 
-echo "🍎 Starting VOLTA OS Development Environment..."
+echo "🍎 Starting ORCHESTRA OS Development Environment..."
 echo ""
 
 # Check if backend dependencies are installed

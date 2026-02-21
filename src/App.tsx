@@ -6,6 +6,7 @@ import Workspaces from './components/Workspaces'
 import { MemoryTab, BriefsTab, FilesTab, ProjectsTab } from './components/BrainSection'
 import { ClaudeCodePanel } from './components/ClaudeCodePanel'
 import ErisMornConsole from './components/ErisMornConsole'
+import AgentCouncil from './components/AgentCouncil'
 import DecisionFeed from './components/DecisionFeed'
 import StandingOrders from './components/StandingOrders'
 import SynthesisView from './components/SynthesisView'
@@ -33,7 +34,7 @@ type Tab =
   // Ops tabs
   | 'task-manager' | 'org-chart' | 'workspaces' | 'docs' | 'agents' | 'observability'
   // Command tabs
-  | 'console' | 'decisions' | 'orders' | 'triage' | 'delegations' | 'tokens'
+  | 'council' | 'console' | 'decisions' | 'orders' | 'triage' | 'delegations' | 'tokens'
   // AgentForge tabs
   | 'vector-galaxy' | 'memory-search' | 'cascade-leads'
 
@@ -89,6 +90,7 @@ const sidebarSections: SidebarItem[] = [
     icon: <Radio className="w-5 h-5" />,
     label: 'Command',
     tabs: [
+      { id: 'council', label: 'Council', icon: <Users className="w-4 h-4" /> },
       { id: 'console', label: 'Console', icon: <MessageSquare className="w-4 h-4" /> },
       { id: 'decisions', label: 'Decisions', icon: <GitBranch className="w-4 h-4" /> },
       { id: 'orders', label: 'Orders', icon: <ShieldCheck className="w-4 h-4" /> },
@@ -253,7 +255,7 @@ export default function App() {
                     animation: 'gradient-shift 8s ease infinite, rgb-split 4s ease-in-out infinite',
                   }}
                 >
-                  VOLTA OS
+                  ORCHESTRA OS
                 </h1>
                 <span className={`text-[10px] uppercase tracking-widest ${accent.text} opacity-70 border-l border-gray-700/50 pl-3`}>
                   {currentSection?.label}
@@ -374,6 +376,7 @@ export default function App() {
             {activeTab === 'tokens' && <TokenUsage />}
 
             {/* COMMAND Section */}
+            {activeTab === 'council' && <AgentCouncil />}
             {activeTab === 'console' && <ErisMornConsole />}
             {activeTab === 'decisions' && <DecisionFeed />}
             {activeTab === 'orders' && <StandingOrders />}
@@ -399,7 +402,7 @@ export default function App() {
             }}
           />
           <span className="relative text-gray-500">
-            <span className="text-neon-pink/60 font-mono">VOLTA OS</span>
+            <span className="text-neon-pink/60 font-mono">ORCHESTRA OS</span>
             <span className="mx-2 text-gray-700">|</span>
             <span>ErisMorn + Volta</span>
             <span className="mx-2 text-gray-700">|</span>
@@ -460,19 +463,19 @@ function DocsPage() {
             WebkitTextFillColor: 'transparent',
           }}
         >
-          VOLTA OS
+          ORCHESTRA OS
         </h1>
         <p className="text-gray-500 mb-8 font-mono text-sm">// The operational nervous system for Volta + ErisMorn</p>
 
         <div className="space-y-8">
-          {/* What is VOLTA OS */}
+          {/* What is ORCHESTRA OS */}
           <section>
             <h2 className="text-xl font-semibold text-cyan-300 mb-3 flex items-center gap-2">
               <span className="w-2 h-2 bg-neon-cyan rounded-full shadow-[0_0_8px_rgba(0,255,255,0.5)]" />
-              What is VOLTA OS?
+              What is ORCHESTRA OS?
             </h2>
             <div className="text-gray-300 space-y-3 pl-4 border-l border-neon-cyan/20">
-              <p>VOLTA OS is the unified command center for human-AI collaboration. It combines:</p>
+              <p>ORCHESTRA OS is the unified command center for human-AI collaboration. It combines:</p>
               <ul className="list-disc pl-6 space-y-1 text-sm">
                 <li><strong className="text-neon-pink/80">Volta</strong> -- Human orchestrator, CEO, strategic direction</li>
                 <li><strong className="text-neon-cyan/80">ErisMorn</strong> -- AI COO, curator, synthesizer, automation architect</li>
