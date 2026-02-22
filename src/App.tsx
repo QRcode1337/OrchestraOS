@@ -375,8 +375,10 @@ export default function App() {
             {activeTab === 'observability' && <ObservabilityDashboard />}
             {activeTab === 'tokens' && <TokenUsage />}
 
-            {/* COMMAND Section */}
-            {activeTab === 'council' && <AgentCouncil />}
+            {/* COMMAND Section — AgentCouncil always mounted to preserve deliberation state */}
+            <div style={{ display: activeTab === 'council' ? 'block' : 'none' }}>
+              <AgentCouncil />
+            </div>
             {activeTab === 'console' && <ErisMornConsole />}
             {activeTab === 'decisions' && <DecisionFeed />}
             {activeTab === 'orders' && <StandingOrders />}

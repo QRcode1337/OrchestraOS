@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Send, Loader2, AlertCircle, Plus, MessageSquare, ArrowLeft, Radio, Trash2, Clock, ChevronDown, Users } from 'lucide-react'
+import { Send, Loader2, AlertCircle, Plus, MessageSquare, ArrowLeft, Radio, Trash2, Clock, ChevronDown, Users, History, CheckSquare, Square, Wifi, WifiOff } from 'lucide-react'
 
 const API_BASE = 'http://localhost:3001/api'
 
@@ -51,6 +51,37 @@ interface BroadcastResponse {
   toolsUsed: string[]
 }
 
+interface ActionItem {
+  id: string
+  text: string
+  completed: boolean
+  completedAt: string | null
+}
+
+interface DeliberationSummary {
+  id: string
+  topic: string
+  rounds: number
+  status: string
+  createdAt: string
+  completedAt: string | null
+  turnCount: number
+  actionItems?: ActionItem[]
+}
+
+interface DeliberationFull {
+  id: string
+  topic: string
+  rounds: number
+  turns: { round: number; agentId: string; name: string; emoji: string; color: string; content: string; toolsUsed: string[] }[]
+  synthesis: string | null
+  synthesisToolsUsed: string[]
+  actionItems: ActionItem[]
+  status: string
+  createdAt: string
+  completedAt: string | null
+}
+
 export default function AgentCouncil() {
   const [viewMode, setViewMode] = useState<ViewMode>('overview')
   const [agents, setAgents] = useState<Agent[]>([])
@@ -91,12 +122,24 @@ export default function AgentCouncil() {
   const [deliberationThinkingAgent, setDeliberationThinkingAgent] = useState<string | null>(null)
   const [deliberationSynthesizing, setDeliberationSynthesizing] = useState(false)
   const [deliberationSessionId, setDeliberationSessionId] = useState<string | null>(null)
+  const [deliberationActionItems, setDeliberationActionItems] = useState<ActionItem[]>([])
   const deliberationBottomRef = useRef<HTMLDivElement>(null)
 
-  // Fetch agents and models on mount
+  // History state
+  const [deliberationHistory, setDeliberationHistory] = useState<DeliberationSummary[]>([])
+  const [historyMode, setHistoryMode] = useState(false)
+  const [viewingHistorySession, setViewingHistorySession] = useState<DeliberationFull | null>(null)
+  const [historyLoading2, setHistoryLoading2] = useState(false)
+
+  // Gateway status
+  const [gatewayConnected, setGatewayConnected] = useState<boolean | null>(null)
+
+  // Fetch agents, models, history, and gateway status on mount
   useEffect(() => {
     fetchAgents()
     fetchModels()
+    fetchDeliberationHistory()
+    fetchGatewayStatus()
   }, [])
 
   // Auto-scroll on new messages
@@ -131,6 +174,71 @@ export default function AgentCouncil() {
       setAvailableModels(data.models || [])
     } catch {
       // Models endpoint not critical
+    }
+  }
+
+  async function fetchDeliberationHistory() {
+    try {
+      const res = await fetch(`${API_BASE}/council/deliberations`)
+      if (!res.ok) return
+      const data = await res.json()
+      setDeliberationHistory(data.sessions || [])
+    } catch {
+      // Not critical
+    }
+  }
+
+  async function fetchGatewayStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/gateway/status`)
+      if (!res.ok) return
+      const data = await res.json()
+      setGatewayConnected(data.connected)
+    } catch {
+      setGatewayConnected(false)
+    }
+  }
+
+  async function loadHistorySession(id: string) {
+    setHistoryLoading2(true)
+    try {
+      const res = await fetch(`${API_BASE}/council/deliberation/${id}`)
+      if (!res.ok) throw new Error('Not found')
+      const data = await res.json()
+      setViewingHistorySession(data.session)
+    } catch {
+      setViewingHistorySession(null)
+    } finally {
+      setHistoryLoading2(false)
+    }
+  }
+
+  async function toggleActionItemCompletion(deliberationId: string, actionItemId: string) {
+    try {
+      const res = await fetch(`${API_BASE}/council/deliberation/${deliberationId}/actions`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actionItemId })
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const updated = data.actionItem
+
+      // Update local state for active deliberation
+      setDeliberationActionItems(prev =>
+        prev.map(a => a.id === actionItemId ? { ...a, completed: updated.completed, completedAt: updated.completedAt } : a)
+      )
+
+      // Update viewing history session
+      setViewingHistorySession(prev => {
+        if (!prev) return null
+        return {
+          ...prev,
+          actionItems: prev.actionItems.map(a => a.id === actionItemId ? { ...a, completed: updated.completed, completedAt: updated.completedAt } : a)
+        }
+      })
+    } catch {
+      // Silently fail
     }
   }
 
@@ -394,12 +502,15 @@ export default function AgentCouncil() {
     setDeliberationInput('')
     setDeliberationTurns([])
     setDeliberationSynthesis(null)
+    setDeliberationActionItems([])
     setDeliberationLoading(true)
     setDeliberationCurrentRound(0)
     setDeliberationTotalRounds(0)
     setDeliberationThinkingAgent(null)
     setDeliberationSynthesizing(false)
     setDeliberationSessionId(null)
+    setHistoryMode(false)
+    setViewingHistorySession(null)
     setError(null)
 
     try {
@@ -456,8 +567,12 @@ export default function AgentCouncil() {
                 content: event.content,
                 toolsUsed: event.toolsUsed || [],
               })
+              if (event.actionItems) {
+                setDeliberationActionItems(event.actionItems)
+              }
             } else if (event.type === 'done') {
               setDeliberationSessionId(event.sessionId)
+              fetchDeliberationHistory()
             } else if (event.type === 'error') {
               setError(event.message)
             }
@@ -519,9 +634,22 @@ export default function AgentCouncil() {
     return (
       <div className="h-[calc(100vh-140px)] flex flex-col items-center justify-center p-8">
         <div className="text-center mb-8">
-          <h2 className="text-2xl font-black tracking-wider text-zinc-100 mb-2 font-mono">
-            AGENT COUNCIL
-          </h2>
+          <div className="flex items-center justify-center gap-3 mb-2">
+            <h2 className="text-2xl font-black tracking-wider text-zinc-100 font-mono">
+              AGENT COUNCIL
+            </h2>
+            {/* Gateway Status */}
+            {gatewayConnected !== null && (
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono border ${
+                gatewayConnected
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                  : 'border-red-500/40 bg-red-500/10 text-red-400'
+              }`}>
+                {gatewayConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+                GW {gatewayConnected ? 'ON' : 'OFF'}
+              </div>
+            )}
+          </div>
           <p className="text-zinc-500 text-sm font-mono">
             Select an agent for direct conversation, or broadcast to all.
           </p>
@@ -547,8 +675,11 @@ export default function AgentCouncil() {
               setError(null)
               setDeliberationTurns([])
               setDeliberationSynthesis(null)
+              setDeliberationActionItems([])
               setDeliberationTopic('')
               setDeliberationSessionId(null)
+              setHistoryMode(false)
+              setViewingHistorySession(null)
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 border border-zinc-600 hover:border-cyan-500/60 hover:bg-cyan-500/10 text-zinc-200 font-mono text-sm rounded-lg transition-all hover:shadow-lg hover:shadow-cyan-500/10"
           >
@@ -814,16 +945,31 @@ export default function AgentCouncil() {
           </button>
           <Users className="w-4 h-4 text-cyan-400" />
           <h3 className="text-sm font-bold text-zinc-200 font-mono tracking-wide">COUNCIL DELIBERATION</h3>
-          {deliberationTopic && (
+          {deliberationTopic && !historyMode && (
             <span className="text-xs text-zinc-500 font-mono ml-2 truncate max-w-md">
               — {deliberationTopic}
             </span>
           )}
-          {deliberationSessionId && (
-            <span className="text-[9px] text-zinc-600 font-mono ml-auto">
+          {deliberationSessionId && !historyMode && (
+            <span className="text-[9px] text-zinc-600 font-mono ml-2">
               session: {deliberationSessionId.slice(0, 8)}
             </span>
           )}
+          <button
+            onClick={() => {
+              setHistoryMode(!historyMode)
+              setViewingHistorySession(null)
+              if (!historyMode) fetchDeliberationHistory()
+            }}
+            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-colors ${
+              historyMode
+                ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-300'
+                : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            History
+          </button>
         </div>
 
         {/* Input */}
@@ -883,7 +1029,7 @@ export default function AgentCouncil() {
           </div>
         )}
 
-        {/* Deliberation Timeline */}
+        {/* Deliberation Content */}
         <div className="flex-1 overflow-auto p-4 space-y-6">
           {error && (
             <div className="flex items-center gap-2 px-4 py-2.5 bg-red-900/20 border border-red-700/30 rounded-lg text-sm text-red-300">
@@ -891,6 +1037,166 @@ export default function AgentCouncil() {
               {error}
             </div>
           )}
+
+          {/* ============ HISTORY MODE ============ */}
+          {historyMode && !viewingHistorySession && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-zinc-400 font-mono tracking-wider mb-3">PAST DELIBERATIONS</h4>
+              {deliberationHistory.length === 0 ? (
+                <p className="text-zinc-600 text-sm font-mono">No deliberation history yet.</p>
+              ) : (
+                deliberationHistory.map(d => (
+                  <button
+                    key={d.id}
+                    onClick={() => loadHistorySession(d.id)}
+                    className="w-full text-left p-4 bg-zinc-900 border border-zinc-700/50 rounded-lg hover:border-cyan-500/40 transition-colors group"
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-sm text-zinc-200 font-mono truncate max-w-lg">{d.topic}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${
+                        d.status === 'complete'
+                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                          : d.status === 'error'
+                          ? 'bg-red-500/15 text-red-400 border border-red-500/30'
+                          : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                      }`}>{d.status}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
+                      <span>{d.rounds} rounds</span>
+                      <span>{d.turnCount} turns</span>
+                      <span>{formatDate(d.createdAt)}</span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Viewing a history session */}
+          {historyMode && viewingHistorySession && (
+            <div className="space-y-6">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setViewingHistorySession(null)}
+                  className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <div>
+                  <h4 className="text-sm text-zinc-200 font-mono">{viewingHistorySession.topic}</h4>
+                  <span className="text-[10px] text-zinc-500 font-mono">{formatDate(viewingHistorySession.createdAt)} — {viewingHistorySession.rounds} rounds</span>
+                </div>
+              </div>
+
+              {historyLoading2 ? (
+                <div className="flex items-center gap-2 text-zinc-500 text-sm font-mono">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading...
+                </div>
+              ) : (
+                <>
+                  {/* Render rounds */}
+                  {(() => {
+                    const hRoundsMap = new Map<number, typeof viewingHistorySession.turns>()
+                    for (const turn of viewingHistorySession.turns) {
+                      const existing = hRoundsMap.get(turn.round) || []
+                      existing.push(turn)
+                      hRoundsMap.set(turn.round, existing)
+                    }
+                    return Array.from(hRoundsMap.keys()).sort((a, b) => a - b).map(roundNum => {
+                      const turns = hRoundsMap.get(roundNum) || []
+                      return (
+                        <div key={roundNum}>
+                          <div className="flex items-center gap-3 mb-3">
+                            <div className="h-px flex-1 bg-zinc-700/50" />
+                            <span className="text-xs font-bold text-cyan-400 font-mono tracking-wider">ROUND {roundNum}</span>
+                            <div className="h-px flex-1 bg-zinc-700/50" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            {turns.map((turn, idx) => {
+                              const colors = getAgentColors(turn.color)
+                              return (
+                                <div key={`h-${roundNum}-${turn.agentId}-${idx}`} className={`p-4 bg-zinc-900 border ${colors.border} rounded-lg`}>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-lg">{turn.emoji}</span>
+                                    <span className={`text-sm font-bold ${colors.text} font-mono`}>{turn.name}</span>
+                                  </div>
+                                  <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap font-mono">{turn.content}</p>
+                                  {turn.toolsUsed.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-3">
+                                      {turn.toolsUsed.map((tool, j) => (
+                                        <span key={j} className="text-[10px] px-2 py-0.5 rounded-full bg-purple-900/40 text-purple-300 border border-purple-700/30">{tool}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })
+                  })()}
+
+                  {/* History Synthesis */}
+                  {viewingHistorySession.synthesis && (
+                    <div>
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-rose-500/40 to-transparent" />
+                        <span className="text-xs font-bold text-rose-400 font-mono tracking-wider">SYNTHESIS</span>
+                        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-rose-500/40 to-transparent" />
+                      </div>
+                      <div className="p-5 bg-zinc-900 border border-rose-500 rounded-lg shadow-lg shadow-rose-500/10">
+                        <p className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap font-mono">{viewingHistorySession.synthesis}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* History Action Items */}
+                  {viewingHistorySession.actionItems && viewingHistorySession.actionItems.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-500/40 to-transparent" />
+                        <span className="text-xs font-bold text-amber-400 font-mono tracking-wider">ACTION ITEMS</span>
+                        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-500/40 to-transparent" />
+                      </div>
+                      <div className="space-y-2">
+                        {viewingHistorySession.actionItems.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => toggleActionItemCompletion(viewingHistorySession.id, item.id)}
+                            className={`w-full flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
+                              item.completed
+                                ? 'bg-zinc-900/50 border-zinc-700/30'
+                                : 'bg-zinc-900 border-zinc-700/50 hover:border-amber-500/40'
+                            }`}
+                          >
+                            {item.completed
+                              ? <CheckSquare className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                              : <Square className="w-4 h-4 text-zinc-500 mt-0.5 flex-shrink-0" />
+                            }
+                            <div className="flex-1 min-w-0">
+                              <span className={`text-sm font-mono ${item.completed ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
+                                {item.text}
+                              </span>
+                              {item.completed && item.completedAt && (
+                                <span className="block text-[10px] text-zinc-600 font-mono mt-0.5">
+                                  completed {formatDate(item.completedAt)}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ============ LIVE DELIBERATION MODE ============ */}
+          {!historyMode && <>
 
           {/* Rounds */}
           {roundNumbers.map(roundNum => {
@@ -1059,6 +1365,45 @@ export default function AgentCouncil() {
             </div>
           )}
 
+          {/* Action Items (live deliberation) */}
+          {deliberationActionItems.length > 0 && deliberationSessionId && (
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-500/40 to-transparent" />
+                <span className="text-xs font-bold text-amber-400 font-mono tracking-wider">ACTION ITEMS</span>
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-500/40 to-transparent" />
+              </div>
+              <div className="space-y-2">
+                {deliberationActionItems.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => toggleActionItemCompletion(deliberationSessionId!, item.id)}
+                    className={`w-full flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
+                      item.completed
+                        ? 'bg-zinc-900/50 border-zinc-700/30'
+                        : 'bg-zinc-900 border-zinc-700/50 hover:border-amber-500/40'
+                    }`}
+                  >
+                    {item.completed
+                      ? <CheckSquare className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                      : <Square className="w-4 h-4 text-zinc-500 mt-0.5 flex-shrink-0" />
+                    }
+                    <div className="flex-1 min-w-0">
+                      <span className={`text-sm font-mono ${item.completed ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
+                        {item.text}
+                      </span>
+                      {item.completed && item.completedAt && (
+                        <span className="block text-[10px] text-zinc-600 font-mono mt-0.5">
+                          completed {formatDate(item.completedAt)}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Empty State */}
           {!deliberationLoading && deliberationTurns.length === 0 && !deliberationTopic && (
             <div className="flex items-center justify-center h-full">
@@ -1071,6 +1416,8 @@ export default function AgentCouncil() {
               </div>
             </div>
           )}
+
+          </>}
 
           <div ref={deliberationBottomRef} />
         </div>

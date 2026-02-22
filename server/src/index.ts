@@ -18,7 +18,7 @@ import {
   deleteStandingOrder,
   getTokenUsage
 } from './erismorn.js'
-import { councilChat, councilBroadcast, getCouncilAgents, getCouncilSessions, getCouncilSession, deleteCouncilSession, getAvailableModels, setAgentModel, councilDeliberate, getDeliberationSessions, getDeliberationSession } from './council.js'
+import { councilChat, councilBroadcast, getCouncilAgents, getCouncilSessions, getCouncilSession, deleteCouncilSession, getAvailableModels, setAgentModel, councilDeliberate, councilDeliberateSync, getDeliberationSessions, getDeliberationSession, toggleActionItem, getDeliberationActionItems } from './council.js'
 
 const app = express()
 const PORT = 3001
@@ -1093,6 +1093,70 @@ app.get('/api/council/deliberation/:id', (req, res) => {
     return res.status(404).json({ error: 'Deliberation session not found' })
   }
   res.json({ session })
+})
+
+// POST /api/council/deliberate-sync - Non-SSE synchronous deliberation (for cron/scripts)
+app.post('/api/council/deliberate-sync', async (req, res) => {
+  const { topic, rounds } = req.body
+  if (!topic) {
+    return res.status(400).json({ error: 'topic is required' })
+  }
+
+  try {
+    const session = await councilDeliberateSync(topic, rounds || 3)
+    res.json({ session })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Deliberation failed' })
+  }
+})
+
+// GET /api/council/deliberation/:id/actions - Get action items for a deliberation
+app.get('/api/council/deliberation/:id/actions', (req, res) => {
+  const items = getDeliberationActionItems(req.params.id)
+  if (items === null) {
+    return res.status(404).json({ error: 'Deliberation session not found' })
+  }
+  res.json({ actionItems: items })
+})
+
+// PATCH /api/council/deliberation/:id/actions - Toggle action item completion
+app.patch('/api/council/deliberation/:id/actions', (req, res) => {
+  const { actionItemId } = req.body
+  if (!actionItemId) {
+    return res.status(400).json({ error: 'actionItemId is required' })
+  }
+
+  const item = toggleActionItem(req.params.id, actionItemId)
+  if (!item) {
+    return res.status(404).json({ error: 'Action item or deliberation not found' })
+  }
+  res.json({ actionItem: item })
+})
+
+// GET /api/gateway/status - Check OpenClaw gateway connectivity
+app.get('/api/gateway/status', async (req, res) => {
+  try {
+    const net = await import('net')
+    const socket = new net.default.Socket()
+    const connected = await new Promise<boolean>((resolve) => {
+      socket.setTimeout(2000)
+      socket.connect(18789, '127.0.0.1', () => {
+        socket.destroy()
+        resolve(true)
+      })
+      socket.on('error', () => {
+        socket.destroy()
+        resolve(false)
+      })
+      socket.on('timeout', () => {
+        socket.destroy()
+        resolve(false)
+      })
+    })
+    res.json({ connected, port: 18789 })
+  } catch {
+    res.json({ connected: false, port: 18789 })
+  }
 })
 
 // ============================================================

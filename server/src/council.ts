@@ -9,6 +9,40 @@ const LLM_MODEL = process.env.ERISMORN_MODEL || process.env.LLM_MODEL || 'hermes
 
 const ERISMORN_ROOT = process.env.ERISMORN_ROOT || '/Users/patrickgallowaypro/ErisMorn'
 const DATA_DIR = path.join(ERISMORN_ROOT, 'volta-os/server/data')
+const OPENCLAW_CRON_JOBS = path.join(process.env.HOME || '', '.openclaw/cron/jobs.json')
+
+// Resolve human-readable agent names to cron job UUIDs
+function resolveAgentId(nameOrId: string): string {
+  if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(nameOrId)) {
+    return nameOrId
+  }
+  const normalized = nameOrId.toLowerCase().replace(/[_\s]/g, '-')
+  try {
+    const jobs = JSON.parse(fs.readFileSync(OPENCLAW_CRON_JOBS, 'utf-8'))
+    for (const job of jobs) {
+      const jobName = (job.name || '').toLowerCase().replace(/[_\s]/g, '-')
+      if (jobName === normalized || jobName.startsWith(normalized) || jobName.includes(normalized)) {
+        return job.id
+      }
+    }
+  } catch { /* fallback to static map */ }
+  const AGENT_MAP: Record<string, string> = {
+    'sentinel': '4ecf10fd-d565-4f58-abf6-9fb7678daf8d',
+    'curator': 'f7ab90a9-67c2-4a37-b7fc-0791f9e9ad09',
+    'scout': '8c6e1d0b-3a41-48d2-9f4d-f581b641d241',
+    'synthesizer': 'f67c8a84-8131-42af-97f2-58aac9f20213',
+    'builder': 'be751e0c-2d14-446a-9061-b6172f6fdfc7',
+    'email-heartbeat': '4d5fd619-3479-466b-8691-3a10389f1e4f',
+    'sell-5-losers': 'e9f30ed1-a825-4bec-90ca-d3feb238d42b',
+    'voltamachine-indexer': 'ff92b880-98af-48d6-8c7f-0ee153e1f215',
+    'pieces-ltm': '81ae6b0e-400c-41ef-94d1-8cb87647daf6',
+    'compressor': '5d090083-b22a-4ca6-a249-7eabde5af760',
+    'income-scout': 'dc9830c4-a15b-4e0e-9ad0-8d9cea0985ce',
+    'btc-alerts': 'e5f128fd-a8f6-48bf-8de9-73a305f2fb22',
+    'btc-alert': 'e5f128fd-a8f6-48bf-8de9-73a305f2fb22',
+  }
+  return AGENT_MAP[normalized] || nameOrId
+}
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -197,7 +231,7 @@ const TOOLS = [
       description: 'Manually trigger a cron agent to run immediately.',
       parameters: {
         type: 'object',
-        properties: { agent_id: { type: 'string', description: 'Agent ID to trigger' } },
+        properties: { agent_id: { type: 'string', description: 'Agent name or UUID. Names auto-resolve: sentinel, curator, scout, synthesizer, builder, income-scout, btc-alerts, compressor, voltamachine-indexer, pieces-ltm, email-heartbeat, sell-5-losers' } },
         required: ['agent_id']
       }
     }
@@ -353,12 +387,13 @@ async function executeTool(name: string, input: any): Promise<string> {
     }
 
     case 'trigger_agent': {
-      const agentId = input.agent_id as string
+      const rawId = input.agent_id as string
+      const agentId = resolveAgentId(rawId)
       try {
         execSync(`openclaw cron run ${agentId}`, { encoding: 'utf-8', timeout: 10000 })
-        return `Triggered agent: ${agentId}`
+        return `Triggered agent: ${rawId} (resolved: ${agentId})`
       } catch (e) {
-        return `Failed to trigger ${agentId}: ${e}`
+        return `Failed to trigger ${rawId} (resolved: ${agentId}): ${e}`
       }
     }
 
@@ -407,7 +442,7 @@ async function chatCompletion(
   const body: any = {
     model,
     messages,
-    max_tokens: 2048,
+    max_tokens: 1024,
     temperature: 0.7
   }
   if (useTools) {
@@ -575,6 +610,13 @@ export async function councilChat(
     }
   }
 
+  // If tool-calling loop exhausted without a text response, force one final call without tools
+  if (!finalResponse) {
+    llmMessages.push({ role: 'user', content: 'Please provide your final response as text. No more tool calls.' })
+    const fallback = await chatCompletion(llmMessages, getAgentModel(agent.id), false)
+    finalResponse = fallback.content || '(no response generated)'
+  }
+
   // Save to session
   history.push({
     role: 'user',
@@ -700,6 +742,13 @@ interface DeliberationTurn {
   toolsUsed: string[]
 }
 
+interface ActionItem {
+  id: string
+  text: string
+  completed: boolean
+  completedAt: string | null
+}
+
 interface DeliberationSession {
   id: string
   topic: string
@@ -707,6 +756,7 @@ interface DeliberationSession {
   turns: DeliberationTurn[]
   synthesis: string | null
   synthesisToolsUsed: string[]
+  actionItems: ActionItem[]
   status: 'deliberating' | 'synthesizing' | 'complete' | 'error'
   createdAt: string
   completedAt: string | null
@@ -728,6 +778,66 @@ function saveDeliberationSessions(sessions: DeliberationSession[]): void {
   fs.writeFileSync(getDeliberationSessionsPath(), JSON.stringify(sessions, null, 2))
 }
 
+function extractActionItems(synthesisText: string): ActionItem[] {
+  const items: ActionItem[] = []
+  const lines = synthesisText.split('\n')
+  let inActionSection = false
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    // Detect action item section headers (## Actions, **Actions**, **3. Actionable Recommendations**, etc.)
+    if (/^(?:#{1,4}\s*|\*\*(?:\d+\.\s*)?)(recommended\s+)?action(?:able)?\s*(?:items?|recommendations?)|^(?:#{1,4}\s*|\*\*(?:\d+\.\s*)?)next\s+steps?|^\*\*recommended\s+actions?\*\*/i.test(trimmed)) {
+      inActionSection = true
+      continue
+    }
+
+    // Exit action section on next header, blank line between sections, or non-action bold headers
+    if (inActionSection && (
+      (/^#{1,4}\s+/.test(trimmed) || /^\*\*\d+\./.test(trimmed) || /^\*\*(open\s+questions|decision\s+log|status|next\s+step|summary|note)/i.test(trimmed))
+      && !/action|recommend/i.test(trimmed)
+    )) {
+      inActionSection = false
+      continue
+    }
+
+    // Extract items: "- text", "* text", "1. text", "1) text", "- - **text**"
+    const match = trimmed.match(/^(?:[-*]\s*)*(?:[-*]|\d+[.)]\s*)\s*(.+)/)
+    if (match && inActionSection) {
+      const text = match[1].replace(/^\*\*(.+?)\*\*/, '$1').replace(/\*\*/g, '').trim()
+      if (text.length > 5) {
+        items.push({
+          id: `action-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          text,
+          completed: false,
+          completedAt: null
+        })
+      }
+    }
+  }
+
+  // If no section header found, try to extract numbered items from the end
+  if (items.length === 0) {
+    for (const line of lines) {
+      const trimmed = line.trim()
+      const match = trimmed.match(/^\d+[.)]\s*\*?\*?(.+?)\*?\*?\s*[-—:]?\s*(.*)/)
+      if (match) {
+        const text = (match[1] + (match[2] ? ': ' + match[2] : '')).trim()
+        if (text.length > 10 && /\b(implement|create|build|deploy|schedule|review|analyze|investigate|monitor|establish|develop|prioritize|execute|prepare|set\s+up)\b/i.test(text)) {
+          items.push({
+            id: `action-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            text,
+            completed: false,
+            completedAt: null
+          })
+        }
+      }
+    }
+  }
+
+  return items
+}
+
 export async function councilDeliberate(
   topic: string,
   rounds: number,
@@ -743,6 +853,7 @@ export async function councilDeliberate(
     turns: [],
     synthesis: null,
     synthesisToolsUsed: [],
+    actionItems: [],
     status: 'deliberating',
     createdAt: new Date().toISOString(),
     completedAt: null
@@ -755,9 +866,12 @@ export async function councilDeliberate(
       for (const agent of COUNCIL_AGENTS) {
         onTurn({ type: 'thinking', round, agentId: agent.id, name: agent.name, emoji: agent.emoji })
 
-        // Build transcript from all prior turns
+        // Build transcript from all prior turns (truncate each to ~500 chars to avoid context overflow)
         const transcript = session.turns
-          .map(t => `[Round ${t.round}] ${t.emoji} ${t.name}: ${t.content}`)
+          .map(t => {
+            const truncated = t.content.length > 500 ? t.content.slice(0, 500) + '...' : t.content
+            return `[Round ${t.round}] ${t.emoji} ${t.name}: ${truncated}`
+          })
           .join('\n\n')
 
         const isLastRound = round === rounds
@@ -801,6 +915,13 @@ export async function councilDeliberate(
           }
         }
 
+        // If tool-calling loop exhausted without a text response, force one final call without tools
+        if (!finalContent) {
+          messages.push({ role: 'user', content: 'Please provide your final response as text. No more tool calls.' })
+          const fallback = await chatCompletion(messages, getAgentModel(agent.id), false)
+          finalContent = fallback.content || '(no response generated)'
+        }
+
         const turn: DeliberationTurn = {
           round,
           agentId: agent.id,
@@ -821,19 +942,24 @@ export async function councilDeliberate(
     session.status = 'synthesizing'
     onTurn({ type: 'synthesizing' })
 
+    // Truncate each turn to ~800 chars for synthesis to avoid context overflow
     const fullTranscript = session.turns
-      .map(t => `[Round ${t.round}] ${t.emoji} ${t.name} (${COUNCIL_AGENTS.find(a => a.id === t.agentId)?.role || ''}): ${t.content}`)
+      .map(t => {
+        const truncated = t.content.length > 800 ? t.content.slice(0, 800) + '...' : t.content
+        return `[Round ${t.round}] ${t.emoji} ${t.name} (${COUNCIL_AGENTS.find(a => a.id === t.agentId)?.role || ''}): ${truncated}`
+      })
       .join('\n\n---\n\n')
 
-    const synthesisPrompt = `The council has completed a ${rounds}-round deliberation on: "${topic}"\n\nFull transcript:\n\n${fullTranscript}\n\n---\n\nSynthesize the council's deliberation into a clear executive summary. Include:\n1. Key points of agreement\n2. Points of disagreement or tension\n3. Actionable recommendations (prioritized)\n4. Open questions for further discussion`
+    const synthesisPrompt = `The council has completed a ${rounds}-round deliberation on: "${topic}"\n\nFull transcript:\n\n${fullTranscript}\n\n---\n\nSynthesize the council's deliberation into a clear executive summary. Include:\n1. Key points of agreement\n2. Points of disagreement or tension\n3. Actionable recommendations (prioritized, as a bulleted list starting with "- ")\n4. Open questions for further discussion`
 
     const synthesisResult = await councilChat('erismorn', synthesisPrompt)
     session.synthesis = synthesisResult.response
     session.synthesisToolsUsed = synthesisResult.toolsUsed
+    session.actionItems = extractActionItems(synthesisResult.response)
     session.status = 'complete'
     session.completedAt = new Date().toISOString()
 
-    onTurn({ type: 'synthesis', content: session.synthesis, toolsUsed: session.synthesisToolsUsed })
+    onTurn({ type: 'synthesis', content: session.synthesis, toolsUsed: session.synthesisToolsUsed, actionItems: session.actionItems })
   } catch (e: any) {
     session.status = 'error'
     session.completedAt = new Date().toISOString()
@@ -847,6 +973,38 @@ export async function councilDeliberate(
   saveDeliberationSessions(sessions.slice(0, 50))
 
   return session
+}
+
+export async function councilDeliberateSync(
+  topic: string,
+  rounds: number
+): Promise<DeliberationSession> {
+  const events: any[] = []
+  const session = await councilDeliberate(topic, rounds, (event) => {
+    events.push(event)
+  })
+  return session
+}
+
+export function toggleActionItem(deliberationId: string, actionItemId: string): ActionItem | null {
+  const sessions = loadDeliberationSessions()
+  const session = sessions.find(s => s.id === deliberationId)
+  if (!session) return null
+
+  const item = session.actionItems?.find(a => a.id === actionItemId)
+  if (!item) return null
+
+  item.completed = !item.completed
+  item.completedAt = item.completed ? new Date().toISOString() : null
+  saveDeliberationSessions(sessions)
+  return item
+}
+
+export function getDeliberationActionItems(deliberationId: string): ActionItem[] | null {
+  const sessions = loadDeliberationSessions()
+  const session = sessions.find(s => s.id === deliberationId)
+  if (!session) return null
+  return session.actionItems || []
 }
 
 export function getDeliberationSessions(): Omit<DeliberationSession, 'turns'>[] {
